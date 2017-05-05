@@ -1,5 +1,5 @@
 <library path="libmoveit_trajopt_planner_plugin">
-  <class type="trajopt_interface_ros::TrajoptPlanner" base_class_type="planning_interface::Planner">
+  <class name="trajopt_interface/TrajoptPlanner" type="trajopt_interface_ros::TrajoptPlanner" base_class_type="planning_interface::PlannerManager">
     <description>
       Trajectory Optimization based planning interface
     </description>

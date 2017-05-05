@@ -7,4 +7,4 @@ std::vector<OpenRAVE::KinBodyPtr> importCollisionWorld(OpenRAVE::EnvironmentBase
 
 bool setRaveRobotState(OpenRAVE::RobotBasePtr robot, sensor_msgs::JointState js);
 
-OpenRAVE::RobotBase::ManipulatorPtr getManipulatorFromGroup(const OpenRAVE::RobotBasePtr robot, const kinematic_model::JointModelGroup* model_group);
+OpenRAVE::RobotBase::ManipulatorPtr getManipulatorFromGroup(const OpenRAVE::RobotBasePtr robot, const robot_model::JointModelGroup* model_group);

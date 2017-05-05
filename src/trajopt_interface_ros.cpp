@@ -2,13 +2,12 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <trajopt/common.hpp>
-#include <ipi/sco/optimizers.hpp>
+#include <sco/optimizers.hpp>
 #include <trajopt/rave_utils.hpp>
 #include <utils/eigen_conversions.hpp>
 #include <trajopt/plot_callback.hpp>
 
 #include <moveit/constraint_samplers/constraint_sampler_manager.h>
-#include <moveit/kinematic_state/conversions.h>
 #include <trajopt_interface_ros/trajopt_interface_ros.h>
 #include <trajopt_interface_ros/ros_rave_conversions.h>
 #include <boost/foreach.hpp>
@@ -19,15 +18,15 @@ using namespace std;
 namespace trajopt_interface_ros
 {
 
-TrajoptInterfaceROS::TrajoptInterfaceROS(const kinematic_model::KinematicModelConstPtr& kmodel) :
-  kmodel(kmodel), nh_("~"), enableViewer(false)
+TrajoptInterfaceROS::TrajoptInterfaceROS() :
+  nh_("~"), enableViewer(false)
 {
   OpenRAVE::RaveInitialize();
   penv = OpenRAVE::RaveCreateEnvironment();
   penv->StopSimulation();
   // Load the PR2 by default
   penv->Load("robots/pr2-beta-static.zae") ;
-  
+
   loadParams();
 }
 
@@ -51,8 +50,8 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   OpenRAVE::RobotBasePtr myRobot = trajopt::GetRobot(*myEnv);
   assert(myRobot);
 
-  const kinematic_model::JointModelGroup* model_group = 
-    planning_scene->getKinematicModel()->getJointModelGroup(req.group_name);
+  const robot_model::JointModelGroup* model_group =
+    planning_scene->getRobotModel()->getJointModelGroup(req.group_name);
 
   OpenRAVE::RobotBase::ManipulatorPtr manip = getManipulatorFromGroup(myRobot, model_group);
 
@@ -64,40 +63,37 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   ROS_INFO("Planning for %d joints", numJoints);
 
   // Get the robot's initial joint state
-  jointStateToArray(planning_scene->getKinematicModel(),
-                    req.start_state.joint_state, 
+  jointStateToArray(planning_scene->getRobotModel(),
+                    req.start_state.joint_state,
                     req.group_name,
                     initialState);
 
   setRaveRobotState(myRobot, req.start_state.joint_state);
 
   // Handle multi DOF joints' start state (primarily the base)
-  moveit_msgs::MultiDOFJointState multiDofJoints = req.start_state.multi_dof_joint_state;
-  vector<geometry_msgs::Pose> poses = multiDofJoints.poses;
+  sensor_msgs::MultiDOFJointState multiDofJoints = req.start_state.multi_dof_joint_state;
+  vector<geometry_msgs::Transform> transforms = multiDofJoints.transforms;
   vector<string> mdJoints = multiDofJoints.joint_names;
-  string worldJointFrameId, worldJointChildFrameId;
-  geometry_msgs::Pose worldJointPose;
+  geometry_msgs::Transform worldJointTransform;
   for(size_t i=0; i<mdJoints.size(); i++){
-    ROS_INFO_STREAM("Multi DOF Joint: " << mdJoints[i] << " in frame " << multiDofJoints.frame_ids[i]);
+    ROS_INFO_STREAM("Multi DOF Joint: " << mdJoints[i]);
     if(mdJoints[i] == "world_joint"){ // world_joint represents the offset from odom_combined to base_footprint
-      worldJointPose = poses[i];
-      OpenRAVE::RaveVector<double> trans(poses[i].position.x, poses[i].position.y, poses[i].position.z);
-      OpenRAVE::RaveVector<double> rot(poses[i].orientation.w, poses[i].orientation.x, poses[i].orientation.y, poses[i].orientation.z);
+      worldJointTransform = transforms[i];
+      OpenRAVE::RaveVector<double> trans(transforms[i].translation.x, transforms[i].translation.y, transforms[i].translation.z);
+      OpenRAVE::RaveVector<double> rot(transforms[i].rotation.w, transforms[i].rotation.x, transforms[i].rotation.y, transforms[i].rotation.z);
       OpenRAVE::Transform t(rot, trans);
       myRobot->SetTransform(t);
-      worldJointFrameId = multiDofJoints.frame_ids[i];
-      worldJointChildFrameId = multiDofJoints.child_frame_ids[i];
     }
   }
 
   // Sample the goal constraints to get a joint state
-  kinematic_state::KinematicStatePtr ksp(new kinematic_state::KinematicState(planning_scene->getCurrentState()));
   constraint_samplers::ConstraintSamplerPtr csp = constraint_samplers::ConstraintSamplerManager::selectDefaultSampler(planning_scene, req.group_name, req.goal_constraints[0]);
 
-  kinematic_state::JointStateGroup *jsg = ksp->getJointStateGroup(req.group_name);
-  csp->sample(jsg, *ksp);
-  vector<double> sampled_vals;
-  jsg->getVariableValues(sampled_vals);
+  const robot_state::RobotState &ref_state = planning_scene->getCurrentState();
+  robot_state::RobotState sampled_state(ref_state);
+  csp->sample(sampled_state, ref_state);
+  const double *vpp = sampled_state.getVariablePositions();
+  vector<double> sampled_vals(vpp, vpp + sampled_state.getVariableCount());
   ROS_INFO("Sampled goal joint states");
   goalState = util::toVectorXd(sampled_vals);
 
@@ -107,7 +103,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   trajopt::ProblemConstructionInfo pci(myEnv);
 
   trajopt::RobotAndDOFPtr rad(new trajopt::RobotAndDOF(myRobot, manip->GetArmIndices(), 0, OpenRAVE::Vector(0,0,1)));
-  pci.rad = rad; // trajopt::RADFromName(manip->GetName(), myRobot);  
+  pci.rad = rad; // trajopt::RADFromName(manip->GetName(), myRobot);
 
   trajopt::InitInfo initinfo;
   initinfo.type = trajopt::InitInfo::GIVEN_TRAJ;
@@ -117,19 +113,20 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   for(int k=0; k<numJoints; k++){
     initinfo.data.col(k) = Eigen::VectorXd::LinSpaced(numSteps, initialState(k), goalState(k));
   }
-  ROS_INFO("Init Traj dimensions: %d x %d", initinfo.data.rows(), initinfo.data.cols());
-  
+  ROS_INFO("Init Traj dimensions: %ld x %ld", initinfo.data.rows(), initinfo.data.cols());
+
   boost::shared_ptr<trajopt::JointVelCostInfo> jvci(new trajopt::JointVelCostInfo());
   int jointVelCoeffs;
   nh_.param("joint_vel_coeffs", jointVelCoeffs, 1);
   jvci->coeffs = trajopt::DblVec(numJoints, jointVelCoeffs);
   jvci->name = "jvel0";
 
-  boost::shared_ptr<trajopt::ContinuousCollisionCostInfo> cci(new trajopt::ContinuousCollisionCostInfo());
+  boost::shared_ptr<trajopt::CollisionCostInfo> cci(new trajopt::CollisionCostInfo());
   cci->first_step = 0;
   cci->last_step = numSteps-1;
   cci->coeffs = trajopt::DblVec(numSteps, 20);
   cci->dist_pen = trajopt::DblVec(numSteps, 0.035);
+  cci->continuous = true;
   cci->name = "continuous_collision";
 
   // Create optimization constraints for each goal constraint
@@ -152,7 +149,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
       geometry_msgs::Point pos = positions[orientation_constraints[o].link_name];
       geometry_msgs::Quaternion quat = orientation_constraints[o].orientation;
       // Construct a pose constraint
-      boost::shared_ptr<trajopt::PoseCntInfo> ppci(new trajopt::PoseCntInfo());
+      boost::shared_ptr<trajopt::PoseCostInfo> ppci(new trajopt::PoseCostInfo());
       ppci->timestep = numSteps - 1;
       ppci->xyz = Eigen::Vector3d(pos.x, pos.y, pos.z);
       ppci->wxyz = Eigen::Vector4d(quat.w, quat.x, quat.y, quat.z);
@@ -174,7 +171,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
     if(!joint_constraints.empty()){
       Eigen::VectorXd goalJointConstraints;
       goalJointConstraints.resize(joint_constraints.size());
-      jointStateToArray(planning_scene->getKinematicModel(), js,
+      jointStateToArray(planning_scene->getRobotModel(), js,
                         req.group_name, goalJointConstraints);
       boost::shared_ptr<trajopt::JointConstraintInfo> jci(new trajopt::JointConstraintInfo());
       jci->vals = util::toDblVec(goalJointConstraints);
@@ -195,7 +192,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   trajopt::TrajOptProbPtr prob = trajopt::ConstructProblem(pci);
 
   ROS_INFO("Problem has %d steps and %d dofs", prob->GetNumSteps(), prob->GetNumDOF());
-  ipi::sco::BasicTrustRegionSQP opt(prob);
+  sco::BasicTrustRegionSQP opt(prob);
 
   ros::WallTime create_time = ros::WallTime::now();
 
@@ -206,7 +203,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   // Why does this not happen in the constructor for opt?
   opt.initialize(trajopt::trajToDblVec(prob->GetInitTraj()));
   ROS_INFO("Gave optimization initial trajectory");
-  
+
   if(enableViewer){
     ROS_INFO("Viewer enabled");
     myViewer = OSGViewer::GetOrCreate(myEnv);
@@ -227,7 +224,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   // assume that the trajectory is now optimized, fill in the output structure:
   res.group_name = req.group_name;
   res.trajectory_start = req.start_state;
-  res.planning_time = optduration;
+  res.planning_time = optduration.toSec();
   trajopt::TrajArray finalTraj = trajopt::getTraj(opt.x(), prob->GetVars());
   // fill in joint names:
   // TODO: May need to make sure that joint names are in the same order
@@ -242,15 +239,11 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   // Currently hardcoded for stationary base position
   // Eventually should write methods to convert from RobotAndDOF and trajectory
   // array to ROS joints
-  moveit_msgs::MultiDOFJointTrajectory& mdjt = res.trajectory.multi_dof_joint_trajectory;
+  trajectory_msgs::MultiDOFJointTrajectory& mdjt = res.trajectory.multi_dof_joint_trajectory;
   mdjt.header.frame_id = req.start_state.joint_state.header.frame_id;
   mdjt.joint_names.clear();
-  mdjt.frame_ids.clear();
-  mdjt.child_frame_ids.clear();
   mdjt.joint_names.push_back("world_joint");
-  mdjt.frame_ids.push_back(worldJointFrameId);
-  mdjt.child_frame_ids.push_back(worldJointChildFrameId);
-  
+
 
   // fill in the entire trajectory
   res.trajectory.joint_trajectory.points.resize(prob->GetNumSteps());
@@ -265,17 +258,16 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
       }
     }
     // Set multi DOF joints (currently just stationary base)
-    mdjt.points[i].poses.push_back(worldJointPose);
-    
+    mdjt.points[i].transforms.push_back(worldJointTransform);
+
     // Setting invalid timestamps.
     // Further filtering is required to set valid timestamps accounting for velocity and acceleration constraints.
     res.trajectory.joint_trajectory.points[i].time_from_start = ros::Duration(0.0);
   }
-  
+
   ROS_INFO("Response took %f sec to create", (ros::WallTime::now() - create_time).toSec());
   ROS_INFO("Serviced planning request in %f wall-seconds, trajectory duration is %f", (ros::WallTime::now() - start_time).toSec(), res.trajectory.joint_trajectory.points[finalTraj.rows()-1].time_from_start.toSec());
   res.error_code.val = moveit_msgs::MoveItErrorCodes::SUCCESS;
-  res.planning_time = ros::Duration(optduration.toSec());
 
   if(enableViewer){
     myEnv->Remove(myViewer);

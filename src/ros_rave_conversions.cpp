@@ -85,11 +85,11 @@ OpenRAVE::KinBodyPtr moveitObjectToKinBody(collision_detection::CollisionWorld::
 
 vector<OpenRAVE::KinBodyPtr> importCollisionWorld(OpenRAVE::EnvironmentBasePtr env, const collision_detection::CollisionWorldConstPtr world){
   vector<OpenRAVE::KinBodyPtr> importedBodies;
-  vector<string> objectIds = world->getObjectIds();
-  ROS_INFO("Importing ROS collision world with %d objects", world->getObjectsCount());
+  vector<string> objectIds = world->getWorld()->getObjectIds();
+  ROS_INFO("Importing ROS collision world with %ld objects", objectIds.size());
   for(int i = 0; i < objectIds.size(); i++){
-    ROS_INFO("Importing world object %d of %d", i+1, objectIds.size());
-    collision_detection::CollisionWorld::ObjectConstPtr obj = world->getObject(objectIds[i]);
+    ROS_INFO("Importing world object %d of %ld", i+1, objectIds.size());
+    collision_detection::CollisionWorld::ObjectConstPtr obj = world->getWorld()->getObject(objectIds[i]);
     if(!obj){
       ROS_WARN("Found a null object, skipping it");
       continue;
@@ -145,7 +145,7 @@ bool setRaveRobotState(OpenRAVE::RobotBasePtr robot, sensor_msgs::JointState js)
   return foundAllJoints;
 }
 
-OpenRAVE::RobotBase::ManipulatorPtr getManipulatorFromGroup(const OpenRAVE::RobotBasePtr robot, const kinematic_model::JointModelGroup* model_group){
+OpenRAVE::RobotBase::ManipulatorPtr getManipulatorFromGroup(const OpenRAVE::RobotBasePtr robot, const robot_model::JointModelGroup* model_group){
   std::vector<OpenRAVE::RobotBase::ManipulatorPtr> manipulators = robot->GetManipulators();
   // LOG_INFO_FMT("Found %d manipulators", manipulators.size());
   // LOG_INFO_FMT("Looking for %s", model_group->getName().c_str());

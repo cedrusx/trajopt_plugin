@@ -9,25 +9,25 @@
 #include <trajopt/problem_description.hpp>
 namespace trajopt_interface_ros
 {
+MOVEIT_CLASS_FORWARD(TrajoptInterfaceROS);
 /** @class TrajOptROS */
 class TrajoptInterfaceROS
 {
 public:
-  TrajoptInterfaceROS(const kinematic_model::KinematicModelConstPtr &kmodel);
+  TrajoptInterfaceROS();
   ~TrajoptInterfaceROS();
-  
+
   bool solve(const planning_scene::PlanningSceneConstPtr& planning_scene,
-             const moveit_msgs::MotionPlanRequest &req, 
+             const moveit_msgs::MotionPlanRequest &req,
              moveit_msgs::MotionPlanResponse &res) const;
 
 protected:
-  
+
   /** @brief TODO: Configure things using the param server */
   void loadParams(void);
-  
+
   ros::NodeHandle nh_; /// The ROS node handle
   ros::ServiceClient planner_;
-  kinematic_model::KinematicModelConstPtr kmodel;
   OpenRAVE::EnvironmentBasePtr penv;
   // OpenRAVE::RobotBasePtr robot;
   // OSGViewerPtr viewer;
@@ -36,16 +36,15 @@ protected:
 
 }
 
-
-static inline void jointStateToArray(const kinematic_model::KinematicModelConstPtr& kmodel,
-                              const sensor_msgs::JointState &joint_state, 
-                              const std::string& planning_group_name, 
+static inline void jointStateToArray(const robot_model::RobotModelConstPtr& model,
+                              const sensor_msgs::JointState &joint_state,
+                              const std::string& planning_group_name,
                               Eigen::VectorXd& joint_array)
 {
 // get the jointmodelgroup that we care about
-  const kinematic_model::JointModelGroup* group = kmodel->getJointModelGroup(planning_group_name);
+  const robot_model::JointModelGroup* group = model->getJointModelGroup(planning_group_name);
 //vector of joints
-  std::vector<const kinematic_model::JointModel*> models = group->getJointModels();
+  std::vector<const robot_model::JointModel*> models = group->getJointModels();
 // Loop over joint_state to find the states that match the names
   for(unsigned int i=0; i < joint_state.position.size(); i++)
   {

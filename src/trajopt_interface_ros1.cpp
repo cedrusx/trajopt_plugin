@@ -2,7 +2,6 @@
 #include <Eigen/Dense>
 #include <utils/eigen_conversions.hpp>
 #include <moveit/constraint_samplers/constraint_sampler_manager.h>
-#include <moveit/kinematic_state/conversions.h>
 #include <trajopt_interface_ros/trajopt_interface_ros.h>
 #include <moveit_msgs/GetMotionPlan.h>
 #include <iostream>
@@ -13,7 +12,7 @@ using namespace moveit_msgs;
 namespace trajopt_interface_ros
 {
 
-TrajoptInterfaceROS::TrajoptInterfaceROS(const kinematic_model::KinematicModelConstPtr& kmodel) :
+TrajoptInterfaceROS::TrajoptInterfaceROS() :
     nh_("~")
 {
   cout << "ros ok? " << ros::ok() << endl;
@@ -60,7 +59,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   OpenRAVE::RobotBasePtr myRobot = trajopt::GetRobot(*myEnv);
   assert(myRobot);
 
-  const kinematic_model::JointModelGroup* model_group = 
+  const kinematic_model::JointModelGroup* model_group =
     planning_scene->getKinematicModel()->getJointModelGroup(req.group_name);
 
   OpenRAVE::RobotBase::ManipulatorPtr manip = getManipulatorFromGroup(myRobot, model_group);
@@ -74,7 +73,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
 
   // Get the robot's initial joint state
   jointStateToArray(planning_scene->getKinematicModel(),
-                    req.start_state.joint_state, 
+                    req.start_state.joint_state,
                     req.group_name,
                     initialState);
 
@@ -116,7 +115,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   trajopt::ProblemConstructionInfo pci(myEnv);
 
   trajopt::RobotAndDOFPtr rad(new trajopt::RobotAndDOF(myRobot, manip->GetArmIndices(), 0, OpenRAVE::Vector(0,0,1)));
-  pci.rad = rad; // trajopt::RADFromName(manip->GetName(), myRobot);  
+  pci.rad = rad; // trajopt::RADFromName(manip->GetName(), myRobot);
 
   trajopt::InitInfo initinfo;
   initinfo.type = trajopt::InitInfo::GIVEN_TRAJ;
@@ -127,7 +126,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
     initinfo.data.col(k) = Eigen::VectorXd::LinSpaced(numSteps, initialState(k), goalState(k));
   }
   ROS_INFO("Init Traj dimensions: %d x %d", initinfo.data.rows(), initinfo.data.cols());
-  
+
   boost::shared_ptr<trajopt::JointVelCostInfo> jvci(new trajopt::JointVelCostInfo());
   int jointVelCoeffs;
   nh_.param("joint_vel_coeffs", jointVelCoeffs, 1);
@@ -255,7 +254,7 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
   mdjt.joint_names.push_back("world_joint");
   mdjt.frame_ids.push_back(worldJointFrameId);
   mdjt.child_frame_ids.push_back(worldJointChildFrameId);
-  
+
 
   // fill in the entire trajectory
   res.trajectory.joint_trajectory.points.resize(prob->GetNumSteps());
@@ -271,12 +270,12 @@ bool TrajoptInterfaceROS::solve(const planning_scene::PlanningSceneConstPtr& pla
     }
     // Set multi DOF joints (currently just stationary base)
     mdjt.points[i].poses.push_back(worldJointPose);
-    
+
     // Setting invalid timestamps.
     // Further filtering is required to set valid timestamps accounting for velocity and acceleration constraints.
     res.trajectory.joint_trajectory.points[i].time_from_start = ros::Duration(0.0);
   }
-  
+
   ROS_INFO("Response took %f sec to create", (ros::WallTime::now() - create_time).toSec());
   ROS_INFO("Serviced planning request in %f wall-seconds, trajectory duration is %f", (ros::WallTime::now() - start_time).toSec(), res.trajectory.joint_trajectory.points[finalTraj.rows()-1].time_from_start.toSec());
   res.error_code.val = moveit_msgs::MoveItErrorCodes::SUCCESS;

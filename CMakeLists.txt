@@ -7,8 +7,8 @@ project(trajopt_plugin)
 find_package(catkin REQUIRED COMPONENTS dynamic_reconfigure moveit_core moveit_ros_planning pluginlib roscpp tf genmsg)
 
 # Do something reasonably useful to find trajopt
-set(TRAJOPT_SOURCE_DIR "" CACHE STRING "Trajopt directory (e.g. ~/trajopt)")
-set(TRAJOPT_BUILD_DIR "" CACHE STRING "Trajopt build directory (e.g. ~/build/trajopt)")
+set(TRAJOPT_SOURCE_DIR "~/proj/trajopt")
+set(TRAJOPT_BUILD_DIR "~/proj/trajopt/build")
 if ("${TRAJOPT_SOURCE_DIR}" STREQUAL "")
   # message(STATUS "Attempting to find trajopt")
   # find_path(problem_description src/trajopt/problem_description.hpp PATHS ~/research/trajopt ~/trajopt ~/Proj)
@@ -77,8 +77,10 @@ include_directories(include
 ## Declare a cpp executable
 
 set(MOVEIT_LIB_NAME moveit_trajopt_interface_ros)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
+#set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
 
-add_library(${MOVEIT_LIB_NAME} src/trajopt_interface_ros1.cpp src/ros_rave_conversions.cpp)
+add_library(${MOVEIT_LIB_NAME} src/trajopt_interface_ros.cpp src/ros_rave_conversions.cpp)
 target_link_libraries(${MOVEIT_LIB_NAME}
   ${catkin_LIBRARIES}
   trajopt
@@ -86,7 +88,7 @@ target_link_libraries(${MOVEIT_LIB_NAME}
   ${OpenRAVE_CORE_LIBRARIES}
   )
 
-add_library(moveit_trajopt_planner_plugin src/trajopt_plugin.cpp)
+add_library(moveit_trajopt_planner_plugin src/trajopt_planning_context.cpp src/trajopt_plugin.cpp)
 target_link_libraries(moveit_trajopt_planner_plugin
   ${MOVEIT_LIB_NAME}
   ${catkin_LIBRARIES}
